@@ -3,6 +3,7 @@
 import json
 import hashlib
 import logging
+import ssl as SSL
 
 from aiohttp.client import ClientTimeout
 from datetime import datetime
@@ -42,7 +43,7 @@ class DDIClient(object):
         429: 'Too many requests.'
     }
 
-    def __init__(self, session, host, ssl, auth_token, tenant_id, controller_id, timeout=10):
+    def __init__(self, session, host, ssl, auth_token, tenant_id, controller_id, client_cert, client_key, timeout=10):
         self.session = session
         self.host = host
         self.ssl = ssl
@@ -51,12 +52,17 @@ class DDIClient(object):
         self.tenant = tenant_id
         self.controller_id = controller_id
         self.timeout = timeout
+        self.client_cert = client_cert
+        self.client_key = client_key
         # URL parts which get replaced lateron
         self.placeholders = ['tenant', 'target', 'softwaremodule', 'action',
                              'filename']
         self.replacements = {
             '/MD5SUM': '.MD5SUM'
         }
+        if(self.ssl == True):
+            self.sslcontext = SSL.create_default_context()
+            self.sslcontext.load_cert_chain(client_cert, client_key)
 
     @property
     def cancelAction(self):
@@ -162,13 +168,25 @@ class DDIClient(object):
                     **kwargs))
 
         self.logger.debug('GET {}'.format(url))
-        async with self.session.get(url, headers=get_headers,
+
+        if(self.ssl == True):
+            async with self.session.get(url,headers=get_headers,
+                                    params=query_params,
+                                    timeout=ClientTimeout(self.timeout), ssl=self.sslcontext) as resp:
+
+                await self.check_http_status(resp)
+                json = await resp.json()
+                self.logger.debug(json)
+                return json
+        else:
+            async with self.session.get(url,headers=get_headers,
                                     params=query_params,
                                     timeout=ClientTimeout(self.timeout)) as resp:
-            await self.check_http_status(resp)
-            json = await resp.json()
-            self.logger.debug(json)
-            return json
+
+                await self.check_http_status(resp)
+                json = await resp.json()
+                self.logger.debug(json)
+                return json
 
     async def get_binary_resource(self, api_path, dl_location,
                                   mime='application/octet-stream',
@@ -225,20 +243,36 @@ class DDIClient(object):
         # session timeout & single socket read timeout
         timeout = ClientTimeout(timeout, sock_read=60)
 
-        async with self.session.get(url, headers=get_bin_headers,
-                                    timeout=timeout) as resp:
+        if(self.ssl == True):
+            async with self.session.get(url, headers=get_bin_headers,
+                                    timeout=self.download_timeout, ssl=self.sslcontext) as resp:
 
-            await self.check_http_status(resp)
-            with open(dl_location, 'wb') as fd:
-                while True:
-                    chunk, _ = await resp.content.readchunk()
+                await self.check_http_status(resp)
+                with open(dl_location, 'wb') as fd:
+                    while True:
+                        chunk, _ = await resp.content.readchunk()
 
-                    # we are EOF
-                    if not chunk:
-                        break
+                        # we are EOF
+                        if not chunk:
+                            break
 
-                    fd.write(chunk)
-                    hash_md5.update(chunk)
+                        fd.write(chunk)
+                        hash_md5.update(chunk)
+        else:
+            async with self.session.get(url, headers=get_bin_headers,
+                                    timeout=self.download_timeout) as resp:
+
+                await self.check_http_status(resp)
+                with open(dl_location, 'wb') as fd:
+                    while True:
+                        chunk, _ = await resp.content.readchunk()
+
+                        # we are EOF
+                        if not chunk:
+                            break
+
+                        fd.write(chunk)
+                        hash_md5.update(chunk)
 
         return hash_md5.hexdigest()
 
@@ -264,10 +298,18 @@ class DDIClient(object):
                     **kwargs))
         self.logger.debug('POST {}'.format(url))
 
-        async with self.session.post(url, headers=post_headers,
+        if(self.ssl == True):
+            async with self.session.post(url, headers=post_headers,
+                                     data=json.dumps(data),
+                                     timeout=ClientTimeout(self.timeout),ssl=self.sslcontext) as resp:
+
+                await self.check_http_status(resp)
+        else:
+            async with self.session.post(url, headers=post_headers,
                                      data=json.dumps(data),
                                      timeout=ClientTimeout(self.timeout)) as resp:
-            await self.check_http_status(resp)
+
+                await self.check_http_status(resp)
 
     async def put_resource(self, api_path, data, **kwargs):
         """
@@ -291,10 +333,18 @@ class DDIClient(object):
         self.logger.debug('PUT {}'.format(url))
         self.logger.debug(json.dumps(data))
 
-        async with self.session.put(url, headers=put_headers,
+        if(self.ssl == True):
+            async with self.session.put(url, headers=put_headers,
+                                    data=json.dumps(data),
+                                    timeout=ClientTimeout(self.timeout), ssl=self.sslcontext) as resp:
+
+                await self.check_http_status(resp)
+        else:
+            async with self.session.put(url, headers=put_headers,
                                     data=json.dumps(data),
                                     timeout=ClientTimeout(self.timeout)) as resp:
-            await self.check_http_status(resp)
+
+                await self.check_http_status(resp)
 
     async def check_http_status(self, resp):
         """Log API error message."""

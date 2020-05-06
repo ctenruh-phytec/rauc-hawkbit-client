@@ -25,13 +25,13 @@ class RaucDBUSDDIClient(AsyncDBUSClient):
     interface.
     """
     def __init__(self, session, host, ssl, tenant_id, target_name, auth_token,
-                 attributes, bundle_dl_location, result_callback, step_callback=None, lock_keeper=None):
+                 attributes, bundle_dl_location, client_cert, client_key, result_callback, step_callback=None, lock_keeper=None):
         super(RaucDBUSDDIClient, self).__init__()
 
         self.attributes = attributes
 
         self.logger = logging.getLogger('rauc_hawkbit')
-        self.ddi = DDIClient(session, host, ssl, auth_token, tenant_id, target_name)
+        self.ddi = DDIClient(session, host, ssl, auth_token, tenant_id, target_namei, client_cert, client_key)
         self.action_id = None
 
         bundle_dir = os.path.dirname(bundle_dl_location)
